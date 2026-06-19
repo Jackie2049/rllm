@@ -163,7 +163,19 @@ class CompactFilteringConfig:
 
 @dataclass
 class TransformConfig:
-    """Configuration for the episode-to-group transformation pipeline."""
+    """Configuration for the episode-to-group transformation pipeline.
+
+    Grouping strategy determines how trajectories are grouped for advantage computation:
+    - "by_task_id": All trajectories for the same task share one group and baseline.
+      This is optimal for GRPO where all rollouts of the same prompt should be
+      compared against each other for variance reduction.
+    - "by_task_id_and_name": Trajectories are grouped by task_id AND trajectory name.
+      This is intended for multi-agent scenarios where different roles (e.g. solver
+      vs judge) should have separate baselines.
+    """
+
+    # Grouping strategy
+    grouping_mode: Literal["by_task_id", "by_task_id_and_name"] = "by_task_id"
 
     # Name imputation
     impute_missing_names: bool = True
@@ -178,6 +190,7 @@ class TransformConfig:
     @classmethod
     def from_config(cls, transform_config: DictConfig, *, broadcast: bool = True) -> "TransformConfig":
         return cls(
+            grouping_mode=transform_config.get("grouping_mode", "by_task_id"),
             impute_missing_names=transform_config.get("impute_missing_names", True),
             default_traj_name=transform_config.get("default_traj_name", _DEFAULT_TRAJ_NAME),
             drop_unnamed_traj=transform_config.get("drop_unnamed_traj", False),

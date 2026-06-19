@@ -13,6 +13,7 @@ The pipeline handles:
 import logging
 from collections import defaultdict
 from collections.abc import Callable
+from typing import Literal
 
 import numpy as np
 
@@ -102,12 +103,19 @@ def _validate_and_propagate_rewards(
     return warnings
 
 
-def _build_trajectory_groups(episodes: list[Episode], compact_filtering_config: CompactFilteringConfig | None = None) -> list[TrajectoryGroup]:
+def _build_trajectory_groups(episodes: list[Episode], grouping_mode: Literal["by_task_id", "by_task_id_and_name"] = "by_task_id", compact_filtering_config: CompactFilteringConfig | None = None) -> list[TrajectoryGroup]:
     """
     Build TrajectoryGroups from episodes based on the configured grouping strategy.
 
     Args:
         episodes: List of episodes to group
+        grouping_mode: Strategy for grouping trajectories into TrajectoryGroups.
+            - "by_task_id": All trajectories for the same task_id share one group.
+              Optimal for GRPO advantage computation where all rollouts of the same
+              prompt should be compared against each other.
+            - "by_task_id_and_name": Trajectories are grouped by task_id AND trajectory
+              name. Intended for multi-agent scenarios where different roles (e.g.
+              solver vs judge) should have separate baselines.
 
     Returns:
         List of TrajectoryGroups
@@ -124,8 +132,12 @@ def _build_trajectory_groups(episodes: list[Episode], compact_filtering_config: 
         for trajectory in episode.trajectories:
             if len(trajectory.steps) == 0:
                 continue
-            trajectories_by_name[f"{task_id}:{trajectory.name}"].append(trajectory)
-            metadata_by_name[f"{task_id}:{trajectory.name}"].append(
+            if grouping_mode == "by_task_id":
+                group_key = task_id
+            else:  # "by_task_id_and_name"
+                group_key = f"{task_id}:{trajectory.name}"
+            trajectories_by_name[group_key].append(trajectory)
+            metadata_by_name[group_key].append(
                 {
                     "task_id": episode.task_id,
                     "rollout_idx": episode.rollout_idx,
@@ -185,7 +197,7 @@ def _default_traj_grouping_hook(episodes: list[Episode], transform_config: Trans
     should not be copied (i.e. only reference is passed). This is explicitly enforced & checked in the
     `transform_episodes_to_trajectory_groups` function.
     """
-    trajectory_groups = _build_trajectory_groups(episodes, compact_filtering_config)  # part 1
+    trajectory_groups = _build_trajectory_groups(episodes, transform_config.grouping_mode, compact_filtering_config)  # part 1
     reward_warnings = _validate_and_propagate_rewards(trajectory_groups, transform_config)  # part 2
     if reward_warnings:
         for warning in reward_warnings[:LOG_N_WARNINGS]:
